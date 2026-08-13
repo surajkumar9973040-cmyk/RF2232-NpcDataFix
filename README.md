@@ -13,8 +13,14 @@ address and preserves both fallback sequences:
    `Update_AnimusData`.
 
 It does not compile or link YorozuyaGSLib, ATF Registry, ModuleRegistry, or any
-other Yorozuya gameplay fix. The complete DLL compile graph is two local C++
-files plus four MinHook C files.
+other Yorozuya gameplay fix. The production DLL compile graph is two local C++
+files plus four MinHook C files. A separately packaged diagnostic DLL adds one
+local logger source and caps logging at 256 hook calls.
+
+The standalone implementation corrects one memory-safety defect in the
+upstream Animus fallback: `Insert_AnimusData` reads six values, while upstream
+passed a two-value member. The fix builds the complete zero-initialized
+six-value row and maps the current race's pair before the same insert/retry.
 
 ## Build
 
@@ -28,6 +34,10 @@ msbuild .\RF2232-NpcDataFix.sln /m /t:Rebuild /p:Configuration=Release /p:Platfo
 ```
 
 Output: `build\x64\Release\YorozuyaGS.dll` (x64, `/MT`, v143).
+
+Diagnostic output can be built with
+`/p:NpcDataFixDiagnostics=true`; it is packaged under
+`diagnostic\YorozuyaGS.dll` and writes `NpcDataFix-runtime.log` beside itself.
 
 The GitHub Actions workflow publishes the installable `RF2232-NpcDataFix`
 artifact. See `README-INSTALL.txt` inside it before changing a server.

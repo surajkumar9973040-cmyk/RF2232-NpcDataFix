@@ -4,11 +4,14 @@ RF Online Server 2.2.3.2 x64 - standalone NpcData rollback fix
 WHAT THIS PACKAGE CONTAINS
 
   YorozuyaGS.dll        The standalone fix (x64 Release, static MSVC runtime).
+  diagnostic\            A test-only DLL with a bounded runtime operation log.
   SHA256SUMS.txt        SHA-256 checksum for the DLL.
   LICENSE-*.txt         Upstream Yorozuya and MinHook license notices.
 
 There is no config file. There are no addon DLLs and no Visual C++ runtime DLLs.
-Only the NpcData/AnimusData fallback from goodwinxp/Yorozuya is included.
+Only the NpcData/AnimusData fallback from goodwinxp/Yorozuya is included. The
+Animus insert uses a six-value buffer because the target function reads six
+values; passing upstream's two-value member would read beyond the object.
 
 IMPORTANT COMPATIBILITY REQUIREMENT
 
@@ -27,6 +30,10 @@ Reference upstream release:
 The import-patched ZoneServerUD_x64.exe in that release has:
   Size:    10,460,160 bytes
   SHA-256: EA854DC7E9BA09490316B9FEFC6BFD89EB965BFDE79B7912D4C915E6AE646F59
+
+Do NOT replace your server EXE with that upstream binary merely to obtain the
+import. It also contains unrelated database/network configuration changes.
+Use an import-only patch made from your own backed-up executable.
 
 The upstream file "RFOnline addon for server.zip" is only a Visual Studio addon
 project template. It is not a loader and is intentionally not included.
@@ -61,6 +68,15 @@ INSTALL
 2. No global.json or other config is required.
 3. Start ZoneServer normally and watch its normal startup/crash logs.
 
+If the acceptance test still fails, stop ZoneServer and temporarily replace
+the installed DLL with diagnostic\YorozuyaGS.dll from this package. It has the
+same game logic but writes at most the first 256 hook calls to:
+
+     NpcDataFix-runtime.log
+
+The log is created next to YorozuyaGS.dll on the first hooked save. It contains
+only serial/account/race IDs and operation results, not passwords or DB values.
+
 VERIFY THAT THE DLL IS LOADED
 
 Run 64-bit PowerShell as Administrator while ZoneServer is running:
@@ -83,12 +99,34 @@ ACCEPTANCE TEST
 Success means the same character enters after logout/relogin. Also check normal
 ZoneServer and database logs for failed NpcData or AnimusData operations.
 
+Use a character created AFTER the fixed DLL is confirmed loaded. A checksum row
+already corrupted before installation is not automatically repaired.
+
+DIAGNOSTIC LOG
+
+For each operation, result=1 means success and result=0 means failure. Expected
+fallback order is:
+
+  npc.update.initial
+  npc.insert             (only when the initial update returned 0)
+  npc.update.retry       (only when insert returned 1)
+  animus.update.initial
+  animus.insert          (only when the initial update returned 0)
+  animus.update.retry    (only when insert returned 1)
+
+event=exit result=1 means the complete hook succeeded. If the log is not
+created after logout, the tested process did not execute this hook (commonly a
+different EXE/DLL path). If every stage succeeds but the client still closes,
+the fault is outside this NpcData hook. Send NpcDataFix-runtime.log together
+with the normal ZoneServer/DB log from the same test.
+
 REMOVE / ROLLBACK
 
 1. Stop ZoneServer completely.
 2. Restore the backed-up original ZoneServerUD_x64.exe FIRST.
 3. Restore the previous YorozuyaGS.dll and YorozuyaGS\ folder if they existed;
    otherwise remove this package's YorozuyaGS.dll.
+   You may also remove NpcDataFix-runtime.log; it contains diagnostics only.
 4. Start ZoneServer and verify normal startup.
 
 Do not simply delete YorozuyaGS.dll while keeping an import-patched ZoneServer:

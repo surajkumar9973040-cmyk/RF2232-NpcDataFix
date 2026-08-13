@@ -4,6 +4,9 @@
 #include <cstdint>
 
 #include <NpcDataFix/NpcDataFallback.hpp>
+#if defined(NPCDATAFIX_DIAGNOSTICS)
+#include <NpcDataFix/RuntimeDiagnostics.hpp>
+#endif
 #include <NpcDataFix/UpstreamAddresses.hpp>
 
 namespace
@@ -48,7 +51,24 @@ namespace
         CRFWorldDatabase* const database)
     {
         // The upstream callback receives a trampoline but intentionally never calls it.
+#if defined(NPCDATAFIX_DIAGNOSTICS)
+        auto diagnostics = RuntimeDiagnostics::BeginCall(data, database, g_status);
+        if (data != nullptr)
+        {
+            RuntimeDiagnostics::WriteIdentity(
+                diagnostics, data->m_dwSerial, data->m_dwAccountSerial, data->m_byRace);
+        }
+        const FallbackObserver observer{
+            &diagnostics,
+            RuntimeDiagnostics::BeforeOperation,
+            RuntimeDiagnostics::AfterOperation,
+        };
+        const bool result = ApplyNpcDataFallback(data, database, g_databaseApi, &observer);
+        RuntimeDiagnostics::EndCall(diagnostics, result);
+        return result;
+#else
         return ApplyNpcDataFallback(data, database, g_databaseApi);
+#endif
     }
 
     bool IsExpectedTarget() noexcept
@@ -160,6 +180,9 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID reserved)
     case DLL_PROCESS_ATTACH:
         // The upstream YorozuyaGS also installs its ATF hooks during process attach.
         // Static CRT is used, so DisableThreadLibraryCalls is intentionally omitted.
+#if defined(NPCDATAFIX_DIAGNOSTICS)
+        RuntimeDiagnostics::SetModule(module);
+#endif
         return InstallHook() ? TRUE : FALSE;
 
     case DLL_PROCESS_DETACH:

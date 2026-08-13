@@ -20,6 +20,21 @@ it. That argument is supplied only by the ATF wrapper. A direct MinHook detour
 therefore uses the actual two-argument x64 function ABI: object pointer and
 database pointer.
 
+### Required Animus insert safety correction
+
+Disassembly of `CRFWorldDatabase::Insert_AnimusData` at `0x1404A0130` proves
+that it reads six consecutive `double` values (`Data0` through `Data5`). The
+checksum object has only `m_dValues[2]`. Upstream passes that two-value member
+directly, causing four out-of-bounds reads. The original ZoneServer
+`InsertTrunkData` path instead creates a zeroed six-value buffer, confirming the
+callee contract.
+
+The standalone fallback therefore creates six zeroed values and maps the
+current pair to indices `race * 2` and `race * 2 + 1` before calling the same
+upstream insert address. It then performs the same Animus update retry. This is
+the only deliberate gameplay-path deviation and prevents a newly inserted row
+from receiving stack garbage.
+
 ## Exact upstream addresses
 
 | Symbol | Address | Upstream generated source |
@@ -35,7 +50,7 @@ the upstream fix calls `Insert_NpcData(serial, values)` at `0x14049EF50`.
 
 ## Compile boundary
 
-`NpcDataFix.vcxproj` contains exactly six translation units:
+The production `NpcDataFix.vcxproj` contains exactly six translation units:
 
 - `src/NpcDataFallback.cpp`
 - `src/NpcDataFix.cpp`
@@ -44,13 +59,18 @@ the upstream fix calls `Insert_NpcData(serial, values)` at `0x14049EF50`.
 - `third_party/minhook/src/trampoline.c`
 - `third_party/minhook/src/hde/hde64.c`
 
+The optional diagnostic build compiles one additional unit,
+`src/RuntimeDiagnostics.cpp`. It observes the same calls and writes a bounded
+Win32 log; it does not change their parameters, branches, or results.
+
 It contains no `ProjectReference`, no `YorozuyaGSLib`, no ATF registry, no
 Yorozuya module registry, and no source for anti-dupe, combat, GM, speedhack,
 auction, mail, trade, or another gameplay fix. CI parses the project and fails
 if this audited compile graph changes.
 
-`NpcDataFixTests.vcxproj` is a separate test executable. Its eight scenarios
+`NpcDataFixTests.vcxproj` is a separate test executable. Its scenarios
 verify success, insert failure, and retry failure for both fallback sequences;
+all three race mappings, invalid-race rejection, and observer ordering;
 it is not linked into the DLL or shipped in the installation artifact.
 
 ## Loader boundary

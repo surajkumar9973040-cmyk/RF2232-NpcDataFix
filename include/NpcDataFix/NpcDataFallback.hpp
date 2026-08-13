@@ -37,11 +37,29 @@ namespace NpcDataFix
         InsertAnimusDataFn insertAnimusData;
     };
 
+    enum class FallbackOperation : std::uint8_t
+    {
+        NpcUpdateInitial,
+        NpcInsert,
+        NpcUpdateRetry,
+        AnimusUpdateInitial,
+        AnimusInsert,
+        AnimusUpdateRetry,
+    };
+
+    struct FallbackObserver
+    {
+        void* context;
+        void(__cdecl* before)(void*, FallbackOperation) noexcept;
+        void(__cdecl* after)(void*, FallbackOperation, bool) noexcept;
+    };
+
     // Implements YorozuyaGS/NpcData/NpcData.cpp without the ATF wrapper.
     [[nodiscard]] bool ApplyNpcDataFallback(
         CCheckSumCharacAccountTrunkData* data,
         CRFWorldDatabase* database,
-        const DatabaseApi& api);
+        const DatabaseApi& api,
+        const FallbackObserver* observer = nullptr);
 
     static_assert(sizeof(void*) == 8, "RF 2.2.3.2 fix must be built for x64");
     static_assert(sizeof(long double) == 8, "RF 2.2.3.2 x64 requires MSVC's 8-byte long double");

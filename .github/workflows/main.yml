@@ -64,6 +64,7 @@ jobs:
           $expected = @(
             'src\NpcDataFallback.cpp',
             'src\NpcDataFix.cpp',
+            'src\RuntimeDiagnostics.cpp',
             'third_party\minhook\src\buffer.c',
             'third_party\minhook\src\hook.c',
             'third_party\minhook\src\trampoline.c',
@@ -71,7 +72,7 @@ jobs:
           )
 
           if (Compare-Object $expected $compiled) {
-            throw 'Standalone DLL compile graph differs from the six audited translation units.'
+            throw 'Standalone DLL compile graph differs from the seven audited translation units.'
           }
 
           $actualMinHook = git -C '.\third_party\minhook' rev-parse HEAD
@@ -107,14 +108,33 @@ jobs:
             throw "Fallback tests failed with exit code $LASTEXITCODE"
           }
 
+      - name: Build diagnostic DLL
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          msbuild '.\RF2232-NpcDataFix.sln' `
+            /m `
+            /t:Rebuild `
+            /p:Configuration=Release `
+            /p:Platform=x64 `
+            /p:NpcDataFixDiagnostics=true
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Diagnostic DLL build failed with exit code $LASTEXITCODE"
+          }
+
       - name: Verify DLL architecture, exports, and runtime dependencies
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $dll = '.\build\x64\Release\YorozuyaGS.dll'
+          $diagnosticDll = '.\build\x64\Release\YorozuyaGS-diagnostic.dll'
 
-          if (-not (Test-Path $dll -PathType Leaf)) {
-            throw 'YorozuyaGS.dll was not produced.'
+          foreach ($file in @($dll, $diagnosticDll)) {
+            if (-not (Test-Path $file -PathType Leaf)) {
+              throw "Expected DLL was not produced: $file"
+            }
           }
 
           $vswhere = Join-Path ${env:ProgramFiles(x86)} `
@@ -134,27 +154,29 @@ jobs:
             throw 'dumpbin.exe was not found in the Visual Studio C++ toolset.'
           }
 
-          $headers = & $dumpbin /headers $dll | Out-String
-          $exports = & $dumpbin /exports $dll | Out-String
-          $dependencies = & $dumpbin /dependents $dll | Out-String
+          foreach ($file in @($dll, $diagnosticDll)) {
+            $headers = & $dumpbin /headers $file | Out-String
+            $exports = & $dumpbin /exports $file | Out-String
+            $dependencies = & $dumpbin /dependents $file | Out-String
 
-          if ($headers -notmatch 'machine \(x64\)') {
-            throw 'DLL is not x64.'
-          }
-          $exportPattern = '(?m)^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]+\s+(\S+)(?:\s+=.*)?$'
-          $exportNames = @([regex]::Matches($exports, $exportPattern) |
-            ForEach-Object { $_.Groups[1].Value })
-          if (Compare-Object @('YorozuyaGS') $exportNames) {
-            throw "DLL exports differ from the single required YorozuyaGS symbol: $exportNames"
-          }
-          $dependencyPattern = '(?im)^\s+([A-Z0-9_.-]+\.dll)\s*$'
-          $dependencyNames = @([regex]::Matches($dependencies, $dependencyPattern) |
-            ForEach-Object { $_.Groups[1].Value.ToUpperInvariant() })
-          if (Compare-Object @('KERNEL32.DLL') $dependencyNames) {
-            throw "Unexpected DLL dependencies (the /MT build needs only KERNEL32.dll): $dependencyNames"
-          }
+            if ($headers -notmatch 'machine \(x64\)') {
+              throw "$file is not x64."
+            }
+            $exportPattern = '(?m)^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]+\s+(\S+)(?:\s+=.*)?$'
+            $exportNames = @([regex]::Matches($exports, $exportPattern) |
+              ForEach-Object { $_.Groups[1].Value })
+            if (Compare-Object @('YorozuyaGS') $exportNames) {
+              throw "$file exports differ from the single required YorozuyaGS symbol: $exportNames"
+            }
+            $dependencyPattern = '(?im)^\s+([A-Z0-9_.-]+\.dll)\s*$'
+            $dependencyNames = @([regex]::Matches($dependencies, $dependencyPattern) |
+              ForEach-Object { $_.Groups[1].Value.ToUpperInvariant() })
+            if (Compare-Object @('KERNEL32.DLL') $dependencyNames) {
+              throw "Unexpected dependencies in $file: $dependencyNames"
+            }
 
-          Write-Host $dependencies
+            Write-Host $dependencies
+          }
 
       - name: Prepare installation package
         shell: pwsh
@@ -164,6 +186,9 @@ jobs:
 
           New-Item $out -ItemType Directory -Force | Out-Null
           Copy-Item '.\build\x64\Release\YorozuyaGS.dll' $out
+          New-Item (Join-Path $out 'diagnostic') -ItemType Directory -Force | Out-Null
+          Copy-Item '.\build\x64\Release\YorozuyaGS-diagnostic.dll' `
+            (Join-Path $out 'diagnostic\YorozuyaGS.dll')
           Copy-Item '.\README-INSTALL.txt' $out
           Copy-Item '.\LICENSE-Yorozuya.txt' $out
           Copy-Item '.\third_party\minhook\LICENSE.txt' `
@@ -172,6 +197,9 @@ jobs:
           Get-FileHash (Join-Path $out 'YorozuyaGS.dll') -Algorithm SHA256 |
             ForEach-Object { "$($_.Hash) *YorozuyaGS.dll" } |
             Set-Content (Join-Path $out 'SHA256SUMS.txt') -Encoding ascii
+          Get-FileHash (Join-Path $out 'diagnostic\YorozuyaGS.dll') -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash) *diagnostic/YorozuyaGS.dll" } |
+            Add-Content (Join-Path $out 'SHA256SUMS.txt') -Encoding ascii
 
           $expected = @(
             'YorozuyaGS.dll',
@@ -183,6 +211,9 @@ jobs:
           $actual = @(Get-ChildItem $out -File | ForEach-Object { $_.Name })
           if (Compare-Object $expected $actual) {
             throw 'Installation package contains an unexpected file set.'
+          }
+          if (-not (Test-Path (Join-Path $out 'diagnostic\YorozuyaGS.dll') -PathType Leaf)) {
+            throw 'Diagnostic DLL is missing from installation package.'
           }
 
           Get-ChildItem $out -File | Select-Object Name, Length | Format-Table -AutoSize
