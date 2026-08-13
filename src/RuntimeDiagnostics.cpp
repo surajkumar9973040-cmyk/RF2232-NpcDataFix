@@ -56,18 +56,6 @@ namespace NpcDataFix::RuntimeDiagnostics
                 }
             }
 
-            void Pointer(const void* const value) noexcept
-            {
-                constexpr char Digits[] = "0123456789ABCDEF";
-                auto number = reinterpret_cast<std::uintptr_t>(value);
-                Text("0x");
-                for (int shift = static_cast<int>(sizeof(number) * 8) - 4;
-                     shift >= 0;
-                     shift -= 4)
-                {
-                    Character(Digits[(number >> shift) & 0x0F]);
-                }
-            }
         };
 
         const char* OperationName(const FallbackOperation operation) noexcept
@@ -174,10 +162,7 @@ namespace NpcDataFix::RuntimeDiagnostics
         g_module = module;
     }
 
-    CallContext BeginCall(
-        const void* const data,
-        const void* const database,
-        const DWORD installStatus) noexcept
+    CallContext BeginCall(const DWORD installStatus) noexcept
     {
         const auto id = static_cast<std::uint64_t>(InterlockedIncrement64(&g_callId));
         const CallContext call{id, id <= MaximumLoggedCalls};
@@ -198,10 +183,7 @@ namespace NpcDataFix::RuntimeDiagnostics
 
         Line line;
         Prefix(line, call);
-        line.Text(" event=enter data=");
-        line.Pointer(data);
-        line.Text(" db=");
-        line.Pointer(database);
+        line.Text(" event=enter");
         Write(line);
         return call;
     }

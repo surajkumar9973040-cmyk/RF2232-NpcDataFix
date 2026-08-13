@@ -52,7 +52,7 @@ namespace
     {
         // The upstream callback receives a trampoline but intentionally never calls it.
 #if defined(NPCDATAFIX_DIAGNOSTICS)
-        auto diagnostics = RuntimeDiagnostics::BeginCall(data, database, g_status);
+        auto diagnostics = RuntimeDiagnostics::BeginCall(g_status);
         if (data != nullptr)
         {
             RuntimeDiagnostics::WriteIdentity(

@@ -16,10 +16,7 @@ namespace NpcDataFix::RuntimeDiagnostics
 
     void SetModule(HMODULE module) noexcept;
 
-    CallContext BeginCall(
-        const void* data,
-        const void* database,
-        DWORD installStatus) noexcept;
+    CallContext BeginCall(DWORD installStatus) noexcept;
 
     void WriteIdentity(
         const CallContext& call,

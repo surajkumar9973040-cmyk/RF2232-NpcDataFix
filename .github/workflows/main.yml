@@ -172,7 +172,7 @@ jobs:
             $dependencyNames = @([regex]::Matches($dependencies, $dependencyPattern) |
               ForEach-Object { $_.Groups[1].Value.ToUpperInvariant() })
             if (Compare-Object @('KERNEL32.DLL') $dependencyNames) {
-              throw "Unexpected dependencies in $file: $dependencyNames"
+              throw "Unexpected dependencies in ${file}: $dependencyNames"
             }
 
             Write-Host $dependencies
