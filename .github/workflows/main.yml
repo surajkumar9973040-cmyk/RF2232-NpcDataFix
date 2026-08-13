@@ -1,188 +1,196 @@
-name: Build RF2232 NpcData-only fix
+name: Build RF2232 NpcDataFix
 
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: windows-2022
+    timeout-minutes: 10
 
     steps:
-      - name: Checkout helper repository
-        uses: actions/checkout@v4
+      - name: Checkout repository and pinned MinHook
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
 
       - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v2
+        uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3.0.0
+        with:
+          msbuild-architecture: x64
 
-      - name: Clone upstream Yorozuya
-        shell: pwsh
-        run: |
-          git clone --depth 1 https://github.com/goodwinxp/Yorozuya.git upstream
-
-      - name: Retarget project and strip YorozuyaGS to NpcData-only
+      - name: Guard standalone dependency graph
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $root = Join-Path $PWD 'upstream'
 
-          # GitHub's Windows runner has VS2022/v143. Retarget the old VS2017 projects.
-          Get-ChildItem $root -Recurse -File -Include *.vcxproj | ForEach-Object {
-            $text = Get-Content $_.FullName -Raw
-
-            if ($null -eq $text) {
-              return
-            }
-
-            $text = $text.Replace(
-              '<WindowsTargetPlatformVersion>10.0.16299.0</WindowsTargetPlatformVersion>',
-              '<WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>'
-            )
-
-            $text = $text.Replace(
-              '<PlatformToolset>v141</PlatformToolset>',
-              '<PlatformToolset>v143</PlatformToolset>'
-            )
-
-            Set-Content -Path $_.FullName -Value $text -Encoding UTF8
-          }
-
-          # VS2022 uses std::filesystem instead of the old experimental namespace.
-          Get-ChildItem $root -Recurse -File -Include *.h,*.hpp,*.cpp | ForEach-Object {
-            $text = Get-Content $_.FullName -Raw
-
-            if ($null -eq $text) {
-              return
-            }
-
-            if ($text.Contains('::std::experimental::filesystem::v1')) {
-              $text = $text.Replace(
-                '::std::experimental::filesystem::v1',
-                '::std::filesystem'
-              )
-              Set-Content -Path $_.FullName -Value $text -Encoding UTF8
-            }
-          }
-
-          # Compile only the NpcData fix plus the tiny YorozuyaGS core it requires.
-          $proj = Join-Path $root 'YorozuyaGS\YorozuyaGS.vcxproj'
-          [xml]$xml = Get-Content $proj -Raw
-
-          $ns = New-Object System.Xml.XmlNamespaceManager($xml.NameTable)
-          $ns.AddNamespace('msb', 'http://schemas.microsoft.com/developer/msbuild/2003')
-
-          $keep = @(
-            'Common\ModuleRegistry.cpp',
-            'dllmain.cpp',
-            'NpcData\NpcData.cpp',
-            'stdafx.cpp',
-            'Yorozuya.cpp'
+          $project = Get-Content '.\NpcDataFix.vcxproj' -Raw
+          $forbidden = @(
+            'YorozuyaGSLib',
+            'ModuleRegistry',
+            'ATFRegistry',
+            '<ProjectReference'
           )
 
-          $nodes = @($xml.SelectNodes('//msb:ClCompile', $ns))
-          foreach ($node in $nodes) {
-            if ($keep -notcontains $node.Include) {
-              [void]$node.ParentNode.RemoveChild($node)
+          foreach ($value in $forbidden) {
+            if ($project.Contains($value)) {
+              throw "Forbidden dependency in standalone project: $value"
             }
           }
 
-          $xml.Save($proj)
+          $required = @(
+            '<PlatformToolset>v143</PlatformToolset>',
+            '<RuntimeLibrary>MultiThreaded</RuntimeLibrary>',
+            '<ConfigurationType>DynamicLibrary</ConfigurationType>'
+          )
+          foreach ($value in $required) {
+            if (-not $project.Contains($value)) {
+              throw "Required standalone build setting is missing: $value"
+            }
+          }
 
-          Write-Host 'YorozuyaGS .cpp files that remain enabled:'
-          [xml]$check = Get-Content $proj -Raw
-          $ns2 = New-Object System.Xml.XmlNamespaceManager($check.NameTable)
-          $ns2.AddNamespace('msb', 'http://schemas.microsoft.com/developer/msbuild/2003')
-          $check.SelectNodes('//msb:ClCompile', $ns2) |
-            ForEach-Object { Write-Host ('  ' + $_.Include) }
+          [xml]$xml = $project
+          $manager = New-Object System.Xml.XmlNamespaceManager($xml.NameTable)
+          $manager.AddNamespace('msb', 'http://schemas.microsoft.com/developer/msbuild/2003')
+          $compiled = @($xml.SelectNodes('//msb:ClCompile[@Include]', $manager) |
+            ForEach-Object { $_.Include })
+          $expected = @(
+            'src\NpcDataFallback.cpp',
+            'src\NpcDataFix.cpp',
+            'third_party\minhook\src\buffer.c',
+            'third_party\minhook\src\hook.c',
+            'third_party\minhook\src\trampoline.c',
+            'third_party\minhook\src\hde\hde64.c'
+          )
 
-      - name: Build NpcData-only DLL
+          if (Compare-Object $expected $compiled) {
+            throw 'Standalone DLL compile graph differs from the six audited translation units.'
+          }
+
+          $actualMinHook = git -C '.\third_party\minhook' rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or
+              $actualMinHook -ne 'c3fcafdc10146beb5919319d0683e44e3c30d537') {
+            throw "Unexpected MinHook revision: $actualMinHook"
+          }
+
+      - name: Build Release x64
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $root = Join-Path $PWD 'upstream'
-          $solutionDir = $root + '\'
 
-          msbuild `
-            (Join-Path $root 'YorozuyaGS\YorozuyaGS.vcxproj') `
+          New-Item '.\build' -ItemType Directory -Force | Out-Null
+
+          msbuild '.\RF2232-NpcDataFix.sln' `
             /m `
+            /t:Rebuild `
             /p:Configuration=Release `
             /p:Platform=x64 `
-            /p:SolutionDir="$solutionDir"
+            /bl:build\RF2232-NpcDataFix.binlog
 
           if ($LASTEXITCODE -ne 0) {
             throw "MSBuild failed with exit code $LASTEXITCODE"
           }
 
-      - name: Prepare package
+      - name: Run fallback tests
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-
-          $root = Join-Path $PWD 'upstream'
-          $out = Join-Path $PWD 'package'
-          New-Item -ItemType Directory -Force $out | Out-Null
-          New-Item -ItemType Directory -Force (Join-Path $out 'YorozuyaGS') | Out-Null
-
-          $dll = Get-ChildItem $root -Recurse -Filter YorozuyaGS.dll |
-            Select-Object -First 1
-
-          if (-not $dll) {
-            throw 'YorozuyaGS.dll was not produced'
+          & '.\build\x64\Release\NpcDataFixTests.exe'
+          if ($LASTEXITCODE -ne 0) {
+            throw "Fallback tests failed with exit code $LASTEXITCODE"
           }
 
-          Copy-Item $dll.FullName (Join-Path $out 'YorozuyaGS.dll')
+      - name: Verify DLL architecture, exports, and runtime dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dll = '.\build\x64\Release\YorozuyaGS.dll'
 
-          @'
-          {
-            "intervals": {
-              "open_world_wait": 1000,
-              "step_delay": 1000
-            },
-            "registry": {
-              "modules": []
-            }
+          if (-not (Test-Path $dll -PathType Leaf)) {
+            throw 'YorozuyaGS.dll was not produced.'
           }
-          '@ | Set-Content `
-            (Join-Path $out 'YorozuyaGS\global.json') `
-            -Encoding UTF8
 
-          Copy-Item `
-            (Join-Path $root 'RFOnline addon for server.zip') `
-            (Join-Path $out 'RFOnline addon for server.zip')
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} `
+            'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path $vswhere -PathType Leaf)) {
+            throw "vswhere.exe was not found at $vswhere"
+          }
 
-          Copy-Item `
-            (Join-Path $root 'LICENSE') `
-            (Join-Path $out 'Yorozuya-LICENSE.txt')
+          $dumpbin = @(& $vswhere `
+            -latest `
+            -products '*' `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -find 'VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe') |
+            Select-Object -Last 1
+          if ([string]::IsNullOrWhiteSpace($dumpbin) -or
+              -not (Test-Path $dumpbin -PathType Leaf)) {
+            throw 'dumpbin.exe was not found in the Visual Studio C++ toolset.'
+          }
 
-          @'
-          RF Online 2.2.3.2 - NpcData-only experimental build
+          $headers = & $dumpbin /headers $dll | Out-String
+          $exports = & $dumpbin /exports $dll | Out-String
+          $dependencies = & $dumpbin /dependents $dll | Out-String
 
-          Source:
-          https://github.com/goodwinxp/Yorozuya
+          if ($headers -notmatch 'machine \(x64\)') {
+            throw 'DLL is not x64.'
+          }
+          $exportPattern = '(?m)^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]+\s+(\S+)(?:\s+=.*)?$'
+          $exportNames = @([regex]::Matches($exports, $exportPattern) |
+            ForEach-Object { $_.Groups[1].Value })
+          if (Compare-Object @('YorozuyaGS') $exportNames) {
+            throw "DLL exports differ from the single required YorozuyaGS symbol: $exportNames"
+          }
+          $dependencyPattern = '(?im)^\s+([A-Z0-9_.-]+\.dll)\s*$'
+          $dependencyNames = @([regex]::Matches($dependencies, $dependencyPattern) |
+            ForEach-Object { $_.Groups[1].Value.ToUpperInvariant() })
+          if (Compare-Object @('KERNEL32.DLL') $dependencyNames) {
+            throw "Unexpected DLL dependencies (the /MT build needs only KERNEL32.dll): $dependencyNames"
+          }
 
-          Only the built-in fix.npc_data game module is compiled into YorozuyaGS.dll.
-          The other built-in Yorozuya game modules are excluded at compile time.
+          Write-Host $dependencies
 
-          Upstream NpcData behavior retained:
-            Update_NpcData
-              -> if it fails: Insert_NpcData
-              -> retry Update_NpcData
+      - name: Prepare installation package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = '.\package'
 
-          The paired AnimusData fallback remains because it is part of the same
-          upstream save hook.
+          New-Item $out -ItemType Directory -Force | Out-Null
+          Copy-Item '.\build\x64\Release\YorozuyaGS.dll' $out
+          Copy-Item '.\README-INSTALL.txt' $out
+          Copy-Item '.\LICENSE-Yorozuya.txt' $out
+          Copy-Item '.\third_party\minhook\LICENSE.txt' `
+            (Join-Path $out 'LICENSE-MinHook.txt')
 
-          IMPORTANT:
-          Back up the complete ZoneServer folder before testing.
-          '@ | Set-Content (Join-Path $out 'README-FIRST.txt') -Encoding UTF8
+          Get-FileHash (Join-Path $out 'YorozuyaGS.dll') -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash) *YorozuyaGS.dll" } |
+            Set-Content (Join-Path $out 'SHA256SUMS.txt') -Encoding ascii
 
-          Get-ChildItem $out -Recurse |
-            Select-Object FullName, Length |
-            Format-Table -AutoSize
+          $expected = @(
+            'YorozuyaGS.dll',
+            'README-INSTALL.txt',
+            'LICENSE-Yorozuya.txt',
+            'LICENSE-MinHook.txt',
+            'SHA256SUMS.txt'
+          )
+          $actual = @(Get-ChildItem $out -File | ForEach-Object { $_.Name })
+          if (Compare-Object $expected $actual) {
+            throw 'Installation package contains an unexpected file set.'
+          }
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+          Get-ChildItem $out -File | Select-Object Name, Length | Format-Table -AutoSize
+
+      - name: Upload RF2232-NpcDataFix artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: RF2232-NpcDataFix
           path: package/
           if-no-files-found: error
+          retention-days: 90

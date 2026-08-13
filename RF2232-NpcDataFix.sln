@@ -1,0 +1,22 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{BC8A1FFA-BEE3-4634-8014-F334798102B3}") = "NpcDataFix", "NpcDataFix.vcxproj", "{12F429F4-4B7E-4434-AAB5-2C0D59B3448E}"
+EndProject
+Project("{BC8A1FFA-BEE3-4634-8014-F334798102B3}") = "NpcDataFixTests", "NpcDataFixTests.vcxproj", "{B0196F81-B604-4CD7-874F-B04B523B0A53}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{12F429F4-4B7E-4434-AAB5-2C0D59B3448E}.Release|x64.ActiveCfg = Release|x64
+		{12F429F4-4B7E-4434-AAB5-2C0D59B3448E}.Release|x64.Build.0 = Release|x64
+		{B0196F81-B604-4CD7-874F-B04B523B0A53}.Release|x64.ActiveCfg = Release|x64
+		{B0196F81-B604-4CD7-874F-B04B523B0A53}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
