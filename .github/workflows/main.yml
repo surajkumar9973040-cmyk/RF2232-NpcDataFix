@@ -21,83 +21,51 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/goodwinxp/Yorozuya.git upstream
 
-      - name: Ensure VS2017 v141 toolset when possible
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $vs = 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise'
-          $toolsDir = Join-Path $vs 'VC\Tools\MSVC'
-
-          $v141 = Get-ChildItem $toolsDir -Directory -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -like '14.16*' } |
-            Select-Object -First 1
-
-          if (-not $v141) {
-            Write-Host 'v141 is not installed. Trying to add the VS2017 toolset...'
-            $setup = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\setup.exe'
-            if (Test-Path $setup) {
-              & $setup modify `
-                --installPath $vs `
-                --add Microsoft.VisualStudio.Component.VC.v141.x86.x64 `
-                --quiet --norestart --wait
-
-              if ($LASTEXITCODE -ne 0) {
-                Write-Warning "VS Installer returned $LASTEXITCODE"
-              }
-            }
-          }
-
-          $v141 = Get-ChildItem $toolsDir -Directory -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -like '14.16*' } |
-            Select-Object -First 1
-
-          if ($v141) {
-            Write-Host "Using v141: $($v141.FullName)"
-            'USE_V143=0' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          } else {
-            Write-Warning 'v141 still unavailable; workflow will retarget to v143.'
-            'USE_V143=1' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          }
-
-      - name: Strip YorozuyaGS to NpcData-only
+      - name: Retarget project and strip YorozuyaGS to NpcData-only
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $root = Join-Path $PWD 'upstream'
 
-          # Use an SDK present on the hosted Windows runner.
+          # GitHub's Windows runner has VS2022/v143. Retarget the old VS2017 projects.
           Get-ChildItem $root -Recurse -File -Include *.vcxproj | ForEach-Object {
             $text = Get-Content $_.FullName -Raw
+
+            if ($null -eq $text) {
+              return
+            }
+
             $text = $text.Replace(
               '<WindowsTargetPlatformVersion>10.0.16299.0</WindowsTargetPlatformVersion>',
               '<WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>'
             )
 
-            if ($env:USE_V143 -eq '1') {
-              $text = $text.Replace(
-                '<PlatformToolset>v141</PlatformToolset>',
-                '<PlatformToolset>v143</PlatformToolset>'
-              )
-            }
+            $text = $text.Replace(
+              '<PlatformToolset>v141</PlatformToolset>',
+              '<PlatformToolset>v143</PlatformToolset>'
+            )
 
             Set-Content -Path $_.FullName -Value $text -Encoding UTF8
           }
 
-          # v143 no longer needs the old experimental namespace spelling.
-          if ($env:USE_V143 -eq '1') {
-            Get-ChildItem $root -Recurse -File -Include *.h,*.hpp,*.cpp | ForEach-Object {
-              $text = Get-Content $_.FullName -Raw
-              if ($text.Contains('::std::experimental::filesystem::v1')) {
-                $text = $text.Replace(
-                  '::std::experimental::filesystem::v1',
-                  '::std::filesystem'
-                )
-                Set-Content -Path $_.FullName -Value $text -Encoding UTF8
-              }
+          # VS2022 uses std::filesystem instead of the old experimental namespace.
+          Get-ChildItem $root -Recurse -File -Include *.h,*.hpp,*.cpp | ForEach-Object {
+            $text = Get-Content $_.FullName -Raw
+
+            if ($null -eq $text) {
+              return
+            }
+
+            if ($text.Contains('::std::experimental::filesystem::v1')) {
+              $text = $text.Replace(
+                '::std::experimental::filesystem::v1',
+                '::std::filesystem'
+              )
+              Set-Content -Path $_.FullName -Value $text -Encoding UTF8
             }
           }
 
-          # Compile only the NpcData fix plus the tiny core it needs.
+          # Compile only the NpcData fix plus the tiny YorozuyaGS core it requires.
           $proj = Join-Path $root 'YorozuyaGS\YorozuyaGS.vcxproj'
           [xml]$xml = Get-Content $proj -Raw
 
