@@ -35,6 +35,10 @@ upstream insert address. It then performs the same Animus update retry. This is
 the only deliberate gameplay-path deviation and prevents a newly inserted row
 from receiving stack garbage.
 
+The preferred inline deployment embeds that same corrected sequence directly
+inside the audited ZoneServer function. Its payload and every modified PE
+offset are defined and verified by `Patch-ZoneServer-Inline.ps1`.
+
 ## Exact upstream addresses
 
 | Symbol | Address | Upstream generated source |
@@ -48,20 +52,45 @@ from receiving stack garbage.
 The overload `Insert_NpcData(serial)` at `0x14049EEA0` is deliberately not used;
 the upstream fix calls `Insert_NpcData(serial, values)` at `0x14049EF50`.
 
-## Compile boundary
+## DLL-free inline boundary
 
-The production `NpcDataFix.vcxproj` contains exactly six translation units:
+The inline patcher accepts only the original executable with SHA-256
+`BBA474712FB58036CDEF8D387FB9C8AFDC89925323C8743374B15C018E04A545` and
+never overwrites it. It deterministically produces SHA-256
+`1CE090402FD705DA0B1ADEA271F26F3A0DFDE9B8F471E3CA22615217886611A7`.
+
+The replacement body remains inside the original runtime-function range
+`RVA 0x2C0B60..0x2C0BF3`. Its stack allocation grows from `0x20` to `0x50`
+for the six-value Animus buffer. The x64 unwind record changes from
+`01 28 02 00 0F 32 0B 70` to `01 0F 02 00 0F 92 0B 70`, exactly describing
+the new prologue.
+
+One `.npcfix` section is appended at RVA `0x44AFE000`, raw offset `0x9F8E00`.
+It is read+execute code, not writable, and contains only four stack-neutral
+tail-call stubs to the audited database addresses. No import, entry point, data
+directory, dependency, or configuration string changes. The patcher verifies
+that all existing bytes outside the audited PE metadata, target function, and
+two unwind bytes remain unchanged.
+
+The inline mode has no DLL, MinHook, `DllMain`, loader hook, configuration file,
+or runtime dependency. No ZoneServer binary is committed or uploaded; the user
+applies the patcher to their own verified copy.
+
+## DLL compile boundary
+
+The DLL project contains seven audited translation units. The diagnostic source
+is inert unless its build flag is enabled:
 
 - `src/NpcDataFallback.cpp`
 - `src/NpcDataFix.cpp`
+- `src/RuntimeDiagnostics.cpp`
 - `third_party/minhook/src/buffer.c`
 - `third_party/minhook/src/hook.c`
 - `third_party/minhook/src/trampoline.c`
 - `third_party/minhook/src/hde/hde64.c`
 
-The optional diagnostic build compiles one additional unit,
-`src/RuntimeDiagnostics.cpp`. It observes the same calls and writes a bounded
-Win32 log; it does not change their parameters, branches, or results.
+The optional diagnostic build enables the runtime observer. It writes a bounded
+Win32 log but does not change parameters, branches, or results.
 
 It contains no `ProjectReference`, no `YorozuyaGSLib`, no ATF registry, no
 Yorozuya module registry, and no source for anti-dupe, combat, GM, speedhack,
@@ -73,7 +102,7 @@ verify success, insert failure, and retry failure for both fallback sequences;
 all three race mappings, invalid-race rejection, and observer ordering;
 it is not linked into the DLL or shipped in the installation artifact.
 
-## Loader boundary
+## DLL loader boundary
 
 The upstream `RFOnline addon for server.zip` contains only a Visual Studio addon
 template; it is not a loader. The upstream v1.4.2 `ZoneServerUD_x64.exe` forces
@@ -81,8 +110,9 @@ load-time loading through the import `YorozuyaGS.dll!YorozuyaGS`. Consequently,
 the standalone binary retains that exact filename and its single exact export.
 No proprietary ZoneServer binary is redistributed by this repository.
 
-Before installing the hook, the DLL checks the audited ZoneServer image base,
-x64 PE machine, linker timestamp (`0x4A7BAF5B`), image size (`0x44AFF000`),
-executable target mapping, and the first 16 upstream bytes of the hooked
-function. This prevents the five absolute addresses from being used on an
-unrecognized executable that merely happens to have the same preferred base.
+Before installing the hook, the optional DLL deployment checks the audited
+ZoneServer image base, x64 PE machine, linker timestamp (`0x4A7BAF5B`), image
+size (`0x44AFF000`), executable target mapping, and the first 16 upstream bytes
+of the hooked function. This prevents the five absolute addresses from being
+used on an unrecognized executable that merely happens to have the same
+preferred base.

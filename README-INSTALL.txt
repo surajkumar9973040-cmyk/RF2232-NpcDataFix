@@ -1,11 +1,24 @@
 RF Online Server 2.2.3.2 x64 - standalone NpcData rollback fix
 ================================================================
 
+PREFERRED DLL-FREE INSTALLATION
+
+For a server that must not depend on DLL initialization at startup, use
+Patch-ZoneServer-Inline.ps1 and follow README-INLINE.txt. That mode patches an
+exact verified copy of the supported original ZoneServer, keeps its imports and
+configuration, and does not use YorozuyaGS.dll or MinHook at runtime.
+
+The instructions below describe the older standalone DLL deployment. Keep it
+only when a DLL-based diagnostic build is specifically needed.
+
 WHAT THIS PACKAGE CONTAINS
 
   YorozuyaGS.dll        The standalone fix (x64 Release, static MSVC runtime).
   diagnostic\            A test-only DLL with a bounded runtime operation log.
-  SHA256SUMS.txt        SHA-256 checksum for the DLL.
+  Patch-ZoneServer-Inline.ps1
+                         Exact-hash DLL-free ZoneServer patcher.
+  README-INLINE.txt      Preferred inline installation and rollback guide.
+  SHA256SUMS.txt        SHA-256 checksums for packaged files.
   LICENSE-*.txt         Upstream Yorozuya and MinHook license notices.
 
 There is no config file. There are no addon DLLs and no Visual C++ runtime DLLs.

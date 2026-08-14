@@ -108,6 +108,20 @@ jobs:
             throw "Fallback tests failed with exit code $LASTEXITCODE"
           }
 
+      - name: Run DLL-free ZoneServer patcher tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          powershell.exe `
+            -NoProfile `
+            -ExecutionPolicy Bypass `
+            -File '.\tests\Patch-ZoneServer-Inline.Tests.ps1'
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Inline patcher tests failed with exit code $LASTEXITCODE"
+          }
+
       - name: Build diagnostic DLL
         shell: pwsh
         run: |
@@ -190,6 +204,8 @@ jobs:
           Copy-Item '.\build\x64\Release\YorozuyaGS-diagnostic.dll' `
             (Join-Path $out 'diagnostic\YorozuyaGS.dll')
           Copy-Item '.\README-INSTALL.txt' $out
+          Copy-Item '.\README-INLINE.txt' $out
+          Copy-Item '.\Patch-ZoneServer-Inline.ps1' $out
           Copy-Item '.\LICENSE-Yorozuya.txt' $out
           Copy-Item '.\third_party\minhook\LICENSE.txt' `
             (Join-Path $out 'LICENSE-MinHook.txt')
@@ -200,10 +216,18 @@ jobs:
           Get-FileHash (Join-Path $out 'diagnostic\YorozuyaGS.dll') -Algorithm SHA256 |
             ForEach-Object { "$($_.Hash) *diagnostic/YorozuyaGS.dll" } |
             Add-Content (Join-Path $out 'SHA256SUMS.txt') -Encoding ascii
+          Get-FileHash (Join-Path $out 'Patch-ZoneServer-Inline.ps1') -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash) *Patch-ZoneServer-Inline.ps1" } |
+            Add-Content (Join-Path $out 'SHA256SUMS.txt') -Encoding ascii
+          Get-FileHash (Join-Path $out 'README-INLINE.txt') -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash) *README-INLINE.txt" } |
+            Add-Content (Join-Path $out 'SHA256SUMS.txt') -Encoding ascii
 
           $expected = @(
             'YorozuyaGS.dll',
             'README-INSTALL.txt',
+            'README-INLINE.txt',
+            'Patch-ZoneServer-Inline.ps1',
             'LICENSE-Yorozuya.txt',
             'LICENSE-MinHook.txt',
             'SHA256SUMS.txt'
@@ -214,6 +238,11 @@ jobs:
           }
           if (-not (Test-Path (Join-Path $out 'diagnostic\YorozuyaGS.dll') -PathType Leaf)) {
             throw 'Diagnostic DLL is missing from installation package.'
+          }
+          $forbiddenBinaries = @(Get-ChildItem $out -Recurse -File |
+            Where-Object { $_.Extension -in @('.exe', '.zip', '.7z', '.rar') })
+          if ($forbiddenBinaries) {
+            throw "Forbidden server/archive file in package: $($forbiddenBinaries.FullName)"
           }
 
           Get-ChildItem $out -File | Select-Object Name, Length | Format-Table -AutoSize
