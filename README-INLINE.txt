@@ -1,4 +1,4 @@
-RF Online Server 2.2.3.2 x64 - DLL-free NpcData fix
+﻿RF Online Server 2.2.3.2 x64 - DLL-free NpcData fix
 ====================================================
 
 ЭТОТ ВАРИАНТ НЕ ИСПОЛЬЗУЕТ YOROZUYAGS.DLL И MINHOOK
